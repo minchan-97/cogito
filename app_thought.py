@@ -35,13 +35,34 @@ with st.sidebar:
 # ── 사고 구조 초기화 (세션 유지) ──
 def build_default_tree():
     ts = ThoughtStructure(learning_rate=lr, continuity=continuity)
-    ts.add_node(JudgmentNode('start', '이 질문의 성격을 파악'), is_root=True)
-    ts.add_node(JudgmentNode('fact', '사실 확인이 필요한 질문으로 판단'))
-    ts.add_node(JudgmentNode('advice', '조언·판단이 필요한 질문으로 판단'))
-    ts.add_node(JudgmentNode('fact_evidence', '근거를 찾아 사실대로 답', is_terminal=True))
-    ts.add_node(JudgmentNode('fact_direct', '아는 대로 바로 답', is_terminal=True))
-    ts.add_node(JudgmentNode('advice_careful', '상황을 따져 신중히 조언', is_terminal=True))
-    ts.add_node(JudgmentNode('advice_quick', '바로 결론부터 조언', is_terminal=True))
+    ts.add_node(JudgmentNode(
+        'start', '이 질문의 성격을 파악',
+        directive="먼저 이 질문이 무엇을 요구하는지 한 문장으로 파악한다."),
+        is_root=True)
+    ts.add_node(JudgmentNode(
+        'fact', '사실 확인이 필요한 질문으로 판단',
+        directive="이건 사실을 묻는 질문이다. 확실히 아는 것과 불확실한 것을 구분한다."))
+    ts.add_node(JudgmentNode(
+        'advice', '조언·판단이 필요한 질문으로 판단',
+        directive="이건 조언을 구하는 질문이다. 정답이 아니라 판단이 필요하다."))
+    ts.add_node(JudgmentNode(
+        'fact_evidence', '근거를 찾아 사실대로 답',
+        directive="확실한 근거가 있는 것만 단정하고, 불확실한 것은 '불확실하다'고 "
+                  "명시한다. 모르면 모른다고 한다. 추측으로 채우지 않는다.",
+        is_terminal=True))
+    ts.add_node(JudgmentNode(
+        'fact_direct', '아는 대로 바로 답',
+        directive="아는 대로 간결하게 바로 답한다.", is_terminal=True))
+    ts.add_node(JudgmentNode(
+        'advice_careful', '상황을 따져 신중히 조언',
+        directive="① 관련된 상황 요소들을 먼저 나열한다. "
+                  "② 각 요소를 하나씩 평가한다(좋은 점/걸리는 점). "
+                  "③ 그 평가들을 종합해 결론을 낸다. 이 세 단계가 답에 보여야 한다.",
+        is_terminal=True))
+    ts.add_node(JudgmentNode(
+        'advice_quick', '바로 결론부터 조언',
+        directive="결론을 한 문장으로 먼저 말하고, 이유를 한 줄 덧붙인다.",
+        is_terminal=True))
     ts.add_branch('start', 'fact', 0.5)
     ts.add_branch('start', 'advice', 0.5)
     ts.add_branch('fact', 'fact_evidence', 0.5)
@@ -107,7 +128,10 @@ with col2:
         for i, nid in enumerate(rec.path):
             node = ts.nodes.get(nid)
             arrow = "→ " if i > 0 else "📍 "
-            st.markdown(f"{arrow}{node.prompt if node else nid}")
+            st.markdown(f"{arrow}**{node.prompt if node else nid}**")
+            if node and node.directive:
+                st.markdown(f"<small style='color:#5f6368;margin-left:14px;'>"
+                            f"↳ {node.directive}</small>", unsafe_allow_html=True)
     else:
         st.caption("질문하면 여기에 판단 경로가 보여요")
 

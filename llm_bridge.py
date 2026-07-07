@@ -58,18 +58,36 @@ def make_choose_fn(client, model: str = "gpt-4o-mini"):
 
 
 def make_answer_fn(client, node_map, model: str = "gpt-4o-mini"):
-    """지나온 판단 경로를 바탕으로 최종 답변 생성."""
+    """
+    지나온 판단 경로의 directive(구체적 실행 지시)를 순서대로 강제 실행.
+    이것이 '궤적이 답을 통제'하는 핵심 — 경로가 곧 답변 절차가 된다.
+    """
     def answer_fn(path, context):
-        steps = " → ".join(node_map[nid].prompt for nid in path if nid in node_map)
+        # 경로상 각 노드의 directive를 번호 매겨 절차로 구성
+        directives = []
+        for nid in path:
+            node = node_map.get(nid)
+            if node and node.directive:
+                directives.append(node.directive)
+
+        if not directives:
+            # directive 없으면 폴백 (경로 이름만)
+            steps = " → ".join(node_map[nid].prompt for nid in path if nid in node_map)
+            proc = f"판단 경로: {steps}"
+        else:
+            proc = "다음 절차를 '순서대로 반드시' 지켜 답하세요:\n" + \
+                   "\n".join(f"  {i+1}. {d}" for i, d in enumerate(directives))
+
         prompt = (
             f"질문/맥락: {context}\n\n"
-            f"거친 판단 경로: {steps}\n\n"
-            f"이 판단 경로에 따라 답변하세요. 간결하게.")
+            f"{proc}\n\n"
+            f"위 절차를 건너뛰지 말고 그대로 따라 답변하세요. "
+            f"각 단계를 실제로 수행한 게 답에 드러나야 합니다.")
         try:
             resp = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.5, max_tokens=300)
+                temperature=0.4, max_tokens=500)
             return resp.choices[0].message.content.strip()
         except Exception as e:
             return f"(답변 생성 실패: {e})"

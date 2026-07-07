@@ -59,11 +59,11 @@ def make_choose_fn(client, model: str = "gpt-4o-mini"):
 
 def make_answer_fn(client, node_map, model: str = "gpt-4o-mini"):
     """
-    지나온 판단 경로의 directive(구체적 실행 지시)를 순서대로 강제 실행.
-    이것이 '궤적이 답을 통제'하는 핵심 — 경로가 곧 답변 절차가 된다.
+    지나온 판단 경로의 directive(구체적 실행 지시)를 순서대로 실행.
+    절차는 지키되, 답변은 자연스러운 대화체로.
+    반환: (답변, 근거자료 리스트) — 근거는 감사 기록용.
     """
     def answer_fn(path, context):
-        # 경로상 각 노드의 directive를 번호 매겨 절차로 구성
         directives = []
         for nid in path:
             node = node_map.get(nid)
@@ -71,26 +71,35 @@ def make_answer_fn(client, node_map, model: str = "gpt-4o-mini"):
                 directives.append(node.directive)
 
         if not directives:
-            # directive 없으면 폴백 (경로 이름만)
-            steps = " → ".join(node_map[nid].prompt for nid in path if nid in node_map)
-            proc = f"판단 경로: {steps}"
+            proc = ""
         else:
-            proc = "다음 절차를 '순서대로 반드시' 지켜 답하세요:\n" + \
-                   "\n".join(f"  {i+1}. {d}" for i, d in enumerate(directives))
+            proc = "다음 판단 절차를 '내부적으로' 따르세요:\n" + \
+                   "\n".join(f"  - {d}" for d in directives)
 
         prompt = (
-            f"질문/맥락: {context}\n\n"
+            f"질문: {context}\n\n"
             f"{proc}\n\n"
-            f"위 절차를 건너뛰지 말고 그대로 따라 답변하세요. "
-            f"각 단계를 실제로 수행한 게 답에 드러나야 합니다.")
+            f"위 절차는 당신의 사고 과정입니다. 절차대로 판단하되, "
+            f"답변은 '1. 2. 3.' 같은 번호 나열이 아니라 자연스럽고 따뜻한 "
+            f"대화체로 쓰세요. 사람에게 말하듯 편하게. "
+            f"만약 특정 자료·근거를 참고했다면, 답변 맨 끝에 별도 줄로 "
+            f"'[근거: ...]' 형식으로 간단히 적으세요. 없으면 생략하세요.")
         try:
             resp = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.4, max_tokens=500)
-            return resp.choices[0].message.content.strip()
+                temperature=0.6, max_tokens=500)
+            text = resp.choices[0].message.content.strip()
+            # 근거 추출 (감사 기록용)
+            sources = []
+            import re
+            for m in re.finditer(r'\[근거:\s*([^\]]+)\]', text):
+                sources.append(m.group(1).strip())
+            # 근거 표기는 답변에서 떼어내 따로 (답변은 깔끔하게)
+            clean = re.sub(r'\[근거:\s*[^\]]+\]', '', text).strip()
+            return clean, sources
         except Exception as e:
-            return f"(답변 생성 실패: {e})"
+            return f"(답변 생성 실패: {e})", []
     return answer_fn
 
 

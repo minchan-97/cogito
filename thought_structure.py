@@ -62,6 +62,11 @@ class ThoughtStructure:
         self.lr = learning_rate            # 학습률 (전이 변화 폭)
         self.continuity = continuity       # 정체성 유지 강도 (뼈대 보존)
         self.history: List[PathRecord] = []
+        # 의미 기억 (기억흐름 + 망각 루프)
+        # 각 기억: {content, trust, strength, context, timestamp}
+        #   trust: 1.0 TRUST_HUMAN(교정/승인) / 0.6 DERIVED / 0.2 DOUBTED
+        #   strength: 망각 대상 (안 쓰이면 감소, 쓰이면 회복)
+        self.memory: List[dict] = []
 
     # ── 트리 구성 ──
     def add_node(self, node: JudgmentNode, is_root=False):
@@ -157,6 +162,99 @@ class ThoughtStructure:
             tr[to] = max(0.01, min(0.99, new))
             self._normalize(frm)
 
+    # ── 의미 기억 (기억흐름 + 망각) ──
+    def remember(self, content: str, trust: float = 0.6, context: str = ""):
+        """
+        기억할 가치 있는 것만 저장. 아무거나 다 저장 안 함 (망각 철학).
+        trust: 1.0 인간교정/승인 / 0.6 파생 / 0.2 의심
+        같은 내용 있으면 신뢰·강도만 갱신.
+        """
+        from datetime import datetime
+        content = content.strip()
+        if not content:
+            return
+        # 중복 체크 (간단히 포함 관계)
+        for m in self.memory:
+            if content in m["content"] or m["content"] in content:
+                m["trust"] = max(m["trust"], trust)
+                m["strength"] = 1.0   # 다시 언급됐으니 회복
+                return
+        self.memory.append({
+            "content": content, "trust": trust, "strength": 1.0,
+            "context": context,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        })
+
+    def remember_from_correction(self, record: PathRecord, prev_record: PathRecord):
+        """
+        교정 사건(부정→긍정)에서 확정 기억 추출.
+        사용자가 고쳐준 것 = TRUST_HUMAN(1.0). 제일 강한 기억.
+        """
+        # 교정된 답변의 근거·내용을 인간 승인 기억으로
+        if record.sources:
+            for s in record.sources:
+                self.remember(s, trust=1.0, context=record.context)
+        # 답변 자체도 짧게 기억 (교정 후 확정된 것)
+        if record.answer:
+            snippet = record.answer[:100]
+            self.remember(snippet, trust=1.0, context=record.context)
+
+    def recall(self, query: str, embed_fn=None, top_k: int = 3) -> list:
+        """
+        현재 질문에 관련된 기억을 불러옴 (다음 답변에 주입용).
+        embed_fn 있으면 의미 유사도, 없으면 단어 겹침.
+        신뢰·강도 높은 것 우선.
+        """
+        if not self.memory:
+            return []
+        scored = []
+        for m in self.memory:
+            if embed_fn is not None:
+                import numpy as np
+                qv, mv = embed_fn(query), embed_fn(m["content"])
+                sim = float(np.dot(qv, mv) /
+                            ((np.linalg.norm(qv)*np.linalg.norm(mv))+1e-12))
+            else:
+                import re
+                qw = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', query))
+                mw = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', m["content"]))
+                sim = len(qw & mw) / (len(qw)+1e-9) if qw else 0
+            # 관련도 × 신뢰 × 강도
+            score = sim * m["trust"] * m["strength"]
+            if score > 0.05:
+                scored.append((score, m))
+        scored.sort(key=lambda x: -x[0])
+        # 불러온 기억은 강도 회복 (썼으니까)
+        picked = [m for _, m in scored[:top_k]]
+        for m in picked:
+            m["strength"] = min(1.0, m["strength"] + 0.1)
+        return picked
+
+    def forget_step(self, decay: float = 0.05, floor: float = 0.1):
+        """
+        망각 루프: 안 쓰인 기억은 강도 감소. 바닥 밑이면 제거.
+        단, TRUST_HUMAN(1.0)은 잘 안 잊음 (인간 승인은 오래 간다).
+        """
+        survivors = []
+        for m in self.memory:
+            # 인간 승인 기억은 망각 저항
+            d = decay * (0.3 if m["trust"] >= 1.0 else 1.0)
+            m["strength"] -= d
+            if m["strength"] > floor:
+                survivors.append(m)
+        self.memory = survivors
+
+    def memory_context(self, query: str, embed_fn=None) -> str:
+        """다음 답변 생성에 넣을 기억 문자열."""
+        recalled = self.recall(query, embed_fn=embed_fn)
+        if not recalled:
+            return ""
+        lines = []
+        for m in recalled:
+            tag = "확정" if m["trust"] >= 1.0 else "참고"
+            lines.append(f"[{tag}] {m['content']}")
+        return "이전에 확인된 것:\n" + "\n".join(lines)
+
     # ── 정체성 지표 ──
     def dominant_path(self) -> list:
         """현재 가장 강한 판단 경로 = 이 정체성의 기본 사고."""
@@ -194,6 +292,7 @@ class ThoughtStructure:
             "root_id": self.root_id,
             "lr": self.lr, "continuity": self.continuity,
             "history": [r.__dict__ for r in self.history],
+            "memory": self.memory,
         }
         with open(path, "wb") as f:
             pickle.dump(blob, f)
@@ -209,5 +308,5 @@ class ThoughtStructure:
         ts.transitions = blob["transitions"]
         ts.root_id = blob["root_id"]
         ts.history = [PathRecord(**r) for r in blob["history"]]
+        ts.memory = blob.get("memory", [])   # 구버전 호환
         return ts
-

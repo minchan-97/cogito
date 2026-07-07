@@ -126,3 +126,4 @@ class AnchorProbe:
             if dead:
                 msgs.append(f"{', '.join(dead)}를 빼도 답 불변 — 해당 근거 실제 미사용(지어냄 가능)")
         return " / ".join(msgs) if msgs else "근거들이 답변에 고르게 반영됨 (안정)"
+

@@ -159,3 +159,4 @@ class DualBranchAnalyzer:
         if lg_shaky and not ev_shaky:
             msgs.append("★ 근거는 참인데 논리가 무너짐 — 근거검증으론 못 잡는 환각")
         return " / ".join(msgs)
+

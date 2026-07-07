@@ -310,3 +310,4 @@ class ThoughtStructure:
         ts.history = [PathRecord(**r) for r in blob["history"]]
         ts.memory = blob.get("memory", [])   # 구버전 호환
         return ts
+

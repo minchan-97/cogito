@@ -31,6 +31,13 @@ with st.sidebar:
     lr = st.slider("학습률", 0.05, 0.3, 0.15, 0.05)
     continuity = st.slider("정체성 유지", 0.5, 0.95, 0.7, 0.05)
 
+    st.markdown("---")
+    st.markdown("### 정체성 이어가기")
+    uploaded = st.file_uploader(
+        "정체성 업로드", type=None,
+        help="이전에 받은 identity.pkl을 올리면 그 정체성으로 이어갑니다. "
+             "(pkl이 아닌 파일은 무시됩니다)")
+
 
 # ── 사고 구조 초기화 (세션 유지) ──
 def build_default_tree():
@@ -70,6 +77,36 @@ def build_default_tree():
     ts.add_branch('advice', 'advice_careful', 0.5)
     ts.add_branch('advice', 'advice_quick', 0.5)
     return ts
+
+def load_identity_from_bytes(raw: bytes):
+    """업로드 바이트에서 pkl만 골라 정체성 복원. pkl 아니면 None."""
+    import pickle, tempfile
+    try:
+        blob = pickle.loads(raw)
+        # 우리 정체성 pkl인지 최소 확인 (필수 키 존재)
+        if not (isinstance(blob, dict) and "transitions" in blob and "nodes" in blob):
+            return None
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as tf:
+            tf.write(raw)
+            tmp = tf.name
+        return ThoughtStructure.load(tmp)
+    except Exception:
+        return None   # pkl이 아니거나 형식 안 맞으면 무시
+
+
+# 업로드된 정체성 처리 (파일명으로 중복 로드 방지)
+if uploaded is not None:
+    sig = f"{uploaded.name}:{uploaded.size}"
+    if st.session_state.get("loaded_sig") != sig:
+        restored = load_identity_from_bytes(uploaded.getvalue())
+        if restored is not None:
+            st.session_state.ts = restored
+            st.session_state.chat = []
+            st.session_state.last_record = None
+            st.session_state.loaded_sig = sig
+            st.sidebar.success(f"정체성 복원됨 (학습 {len(restored.history)}회)")
+        else:
+            st.sidebar.warning("pkl 정체성 파일이 아닙니다 (무시됨)")
 
 if "ts" not in st.session_state:
     st.session_state.ts = build_default_tree()
@@ -155,9 +192,17 @@ with col2:
     st.markdown(f"**정체성 안정도:** {ts.continuity_rate():.0%}")
     st.markdown(f"**총 학습 횟수:** {len(ts.history)}")
 
-    if st.button("정체성 저장 (pkl)"):
-        path = ts.save("/tmp/identity.pkl")
-        st.success(f"저장됨: {path}")
+    # 정체성 다운로드 (모바일에서 pkl 받기)
+    import pickle as _pkl
+    ts.save("/tmp/identity.pkl")
+    with open("/tmp/identity.pkl", "rb") as f:
+        pkl_bytes = f.read()
+    st.download_button(
+        "⬇️ 정체성 다운로드 (pkl)",
+        data=pkl_bytes,
+        file_name="identity.pkl",
+        mime="application/octet-stream",
+        help="이 정체성을 파일로 받아둡니다. 다음에 업로드하면 이어집니다.")
 
 st.caption("처음엔 실수해도 됩니다. 답이 맘에 들면 '맞아', 아니면 '아니야'로 반응하세요. "
            "그 반응이 판단 경로를 강화/약화해, 점점 당신에게 맞는 사고로 자랍니다. "

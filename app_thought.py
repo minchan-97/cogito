@@ -152,21 +152,39 @@ with col1:
         if st.session_state.last_record is not None:
             fb = detect_feedback(user_input, client=client, model=model)
             if fb is not None:
-                ts.learn(st.session_state.last_record, fb)
-                label = "👍 긍정" if fb > 0 else "👎 부정"
-                st.session_state.chat.append(
-                    ("assistant", f"_({label} 반응 감지 — 그 판단 경로를 "
-                                  f"{'강화' if fb>0 else '약화'}했어요)_"))
+                prev = st.session_state.last_record
+                ts.learn(prev, fb)
+                # 교정 사건(직전이 부정 → 이번 긍정)이면 확정 기억
+                if fb > 0 and st.session_state.get("prev_feedback", 0) < 0:
+                    ts.remember_from_correction(prev, None)
+                    st.session_state.chat.append(
+                        ("assistant", "_(교정 확인 — 확정 기억으로 저장했어요)_"))
+                else:
+                    label = "👍 긍정" if fb > 0 else "👎 부정"
+                    st.session_state.chat.append(
+                        ("assistant", f"_({label} 반응 감지 — 그 판단 경로를 "
+                                      f"{'강화' if fb>0 else '약화'}했어요)_"))
+                st.session_state.prev_feedback = fb
 
-        # 2) 반응이 아니면(또는 반응이어도) 새 질문으로 사고 진행
+        # 2) 반응이 아니면 새 질문으로 사고 진행
         if fb is None:
             choose_fn = make_choose_fn(client, model=model)
             answer_fn = make_answer_fn(client, ts.nodes, model=model)
+            # 관련 기억을 불러와 맥락에 주입 (기억흐름)
+            mem_ctx = ts.memory_context(user_input)
+            full_context = user_input
+            if mem_ctx:
+                full_context = f"{mem_ctx}\n\n질문: {user_input}"
             with st.spinner("판단 트리 위를 이동 중..."):
                 rec = ts.traverse(choose_fn=choose_fn, answer_fn=answer_fn,
-                                  context=user_input)
+                                  context=full_context)
+            # 기록엔 원래 질문만 (감사 로그 깔끔하게)
+            rec.context = user_input
             st.session_state.last_record = rec
+            st.session_state.prev_feedback = 0
             st.session_state.chat.append(("assistant", rec.answer))
+            # 매 턴 망각 (안 쓰인 기억 약화)
+            ts.forget_step()
 
         st.rerun()
 
@@ -212,6 +230,17 @@ with col2:
 
     st.markdown(f"**정체성 안정도:** {ts.continuity_rate():.0%}")
     st.markdown(f"**총 학습 횟수:** {len(ts.history)}")
+
+    # 기억 (기억흐름 + 망각)
+    if ts.memory:
+        st.markdown("---")
+        st.markdown("**🧷 기억 (교정=확정, 나머지는 점차 망각)**")
+        for m in sorted(ts.memory, key=lambda x: -x["trust"]*x["strength"])[:6]:
+            tag = "🔒확정" if m["trust"] >= 1.0 else "📎참고"
+            bar = "▮" * max(1, int(m["strength"] * 6))
+            st.markdown(f"<small>{tag} {m['content'][:32]} "
+                        f"<span style='color:#999'>{bar}</span></small>",
+                        unsafe_allow_html=True)
 
 st.caption("처음엔 실수해도 됩니다. 답이 맘에 들면 '맞아', 아니면 '아니야'로 반응하세요. "
            "그 반응이 판단 경로를 강화/약화해, 점점 당신에게 맞는 사고로 자랍니다. "

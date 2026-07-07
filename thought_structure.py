@@ -210,3 +210,4 @@ class ThoughtStructure:
         ts.root_id = blob["root_id"]
         ts.history = [PathRecord(**r) for r in blob["history"]]
         return ts
+

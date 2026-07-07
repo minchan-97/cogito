@@ -31,12 +31,12 @@ with st.sidebar:
     lr = st.slider("학습률", 0.05, 0.3, 0.15, 0.05)
     continuity = st.slider("정체성 유지", 0.5, 0.95, 0.7, 0.05)
 
-    st.markdown("---")
-    st.markdown("### 정체성 이어가기")
+# 정체성 이어가기 (본문 상단 — 모바일에서도 보이게)
+with st.expander("💾 정체성 저장 / 불러오기", expanded=False):
+    st.caption("대화로 학습한 정체성을 파일로 받아두고, 다음에 올려 이어가세요.")
     uploaded = st.file_uploader(
-        "정체성 업로드", type=None,
-        help="이전에 받은 identity.pkl을 올리면 그 정체성으로 이어갑니다. "
-             "(pkl이 아닌 파일은 무시됩니다)")
+        "정체성 불러오기 (이전 identity.pkl 업로드)", type=None,
+        help="pkl이 아닌 파일은 자동 무시됩니다.")
 
 
 # ── 사고 구조 초기화 (세션 유지) ──
@@ -104,9 +104,9 @@ if uploaded is not None:
             st.session_state.chat = []
             st.session_state.last_record = None
             st.session_state.loaded_sig = sig
-            st.sidebar.success(f"정체성 복원됨 (학습 {len(restored.history)}회)")
+            st.success(f"✅ 정체성 복원됨 (학습 {len(restored.history)}회)")
         else:
-            st.sidebar.warning("pkl 정체성 파일이 아닙니다 (무시됨)")
+            st.warning("⚠️ pkl 정체성 파일이 아닙니다 (무시됨)")
 
 if "ts" not in st.session_state:
     st.session_state.ts = build_default_tree()
@@ -114,6 +114,19 @@ if "ts" not in st.session_state:
     st.session_state.last_record = None
 
 ts = st.session_state.ts
+
+# 정체성 다운로드 (상단 — 모바일에서 바로 보이게)
+import pickle as _pkl
+ts.save("/tmp/identity.pkl")
+with open("/tmp/identity.pkl", "rb") as f:
+    _pkl_bytes = f.read()
+st.download_button(
+    "⬇️ 정체성 다운로드 (identity.pkl)",
+    data=_pkl_bytes,
+    file_name="identity.pkl",
+    mime="application/octet-stream",
+    help="지금까지 학습한 정체성을 파일로 받습니다. 다음에 위 '불러오기'로 올리면 이어집니다.",
+    use_container_width=True)
 
 col1, col2 = st.columns([3, 2])
 
@@ -158,9 +171,17 @@ with col1:
         st.rerun()
 
 with col2:
-    st.subheader("🔍 사고 궤적 (XAI)")
+    st.subheader("🔍 사고 궤적 (감사 로그)")
     rec = st.session_state.last_record
     if rec:
+        if rec.context:
+            st.markdown(f"<small>📥 입력: {rec.context[:40]}</small>",
+                        unsafe_allow_html=True)
+        if getattr(rec, 'timestamp', ''):
+            st.markdown(f"<small>🕐 {rec.timestamp}</small>", unsafe_allow_html=True)
+        if getattr(rec, 'sources', None):
+            st.markdown(f"<small>📚 근거: {', '.join(rec.sources)[:60]}</small>",
+                        unsafe_allow_html=True)
         st.markdown("**이번 답변의 판단 경로:**")
         for i, nid in enumerate(rec.path):
             node = ts.nodes.get(nid)
@@ -191,18 +212,6 @@ with col2:
 
     st.markdown(f"**정체성 안정도:** {ts.continuity_rate():.0%}")
     st.markdown(f"**총 학습 횟수:** {len(ts.history)}")
-
-    # 정체성 다운로드 (모바일에서 pkl 받기)
-    import pickle as _pkl
-    ts.save("/tmp/identity.pkl")
-    with open("/tmp/identity.pkl", "rb") as f:
-        pkl_bytes = f.read()
-    st.download_button(
-        "⬇️ 정체성 다운로드 (pkl)",
-        data=pkl_bytes,
-        file_name="identity.pkl",
-        mime="application/octet-stream",
-        help="이 정체성을 파일로 받아둡니다. 다음에 업로드하면 이어집니다.")
 
 st.caption("처음엔 실수해도 됩니다. 답이 맘에 들면 '맞아', 아니면 '아니야'로 반응하세요. "
            "그 반응이 판단 경로를 강화/약화해, 점점 당신에게 맞는 사고로 자랍니다. "

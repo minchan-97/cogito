@@ -31,7 +31,8 @@ import pickle
 class JudgmentNode:
     """판단 노드 — 하나의 의미 있는 판단 지점."""
     id: str
-    prompt: str          # 이 판단에서 LLM에게 던지는 질문/지시
+    prompt: str          # 이 판단의 이름 (분기 선택 시 LLM에게 보임)
+    directive: str = ""  # 답변 생성 시 실제로 강제되는 구체적 실행 지시
     is_terminal: bool = False   # 최종 판단(잎)인가
 
 

@@ -38,11 +38,14 @@ class JudgmentNode:
 
 @dataclass
 class PathRecord:
-    """한 번의 사고 궤적 기록 (XAI)."""
+    """한 번의 사고 궤적 기록 (감사 로그)."""
     path: list                  # 지나간 노드 id 순서
     choices: list               # 각 분기점에서의 선택
     answer: str = ""
     feedback: Optional[float] = None   # 대화 반응 (+1 긍정 / -1 부정 / None)
+    context: str = ""           # 입력 질문 (감사: 무엇에 답했나)
+    sources: list = field(default_factory=list)  # 가져온 근거 자료 (감사: 무엇을 근거로)
+    timestamp: str = ""         # 시각 (감사: 언제)
 
 
 class ThoughtStructure:
@@ -117,10 +120,19 @@ class ThoughtStructure:
             depth += 1
 
         answer = ""
+        sources = []
         if answer_fn is not None:
-            answer = answer_fn(path, context)
+            result = answer_fn(path, context)
+            # answer_fn이 (답변, 근거리스트) 튜플이면 분리, 아니면 답변만
+            if isinstance(result, tuple) and len(result) == 2:
+                answer, sources = result
+            else:
+                answer = result
 
-        rec = PathRecord(path=path, choices=choices, answer=answer)
+        from datetime import datetime
+        rec = PathRecord(path=path, choices=choices, answer=answer,
+                         context=context, sources=sources or [],
+                         timestamp=datetime.now().isoformat(timespec="seconds"))
         return rec
 
     # ── 대화 반응으로 학습 (전이 강화/약화) ──

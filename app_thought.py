@@ -147,7 +147,18 @@ with col1:
         client = make_client(api_key, local=local)
         st.session_state.chat.append(("user", user_input))
 
-        # 1) 직전 답변이 있으면, 이 입력이 '반응'인지 먼저 감지
+        # 1) 먼저 '정보 제공'인지 확인 (이름/선호 등 — 반응보다 우선)
+        #    "내 이름은 민찬기야" 같은 게 반응으로 오인되지 않도록.
+        shared = detect_shared_info(user_input, client=client, model=model)
+        if shared and hasattr(ts, "remember"):
+            ts.remember(shared, trust=1.0, context=user_input)
+            st.session_state.chat.append(
+                ("assistant", f"기억했어요: {shared} 🔒"))
+            st.session_state.last_record = None
+            st.session_state.prev_feedback = 0
+            st.rerun()
+
+        # 2) 정보가 아니면, 직전 답변에 대한 '반응'인지 감지
         fb = None
         if st.session_state.last_record is not None:
             fb = detect_feedback(user_input, client=client, model=model)
@@ -166,16 +177,6 @@ with col1:
                         ("assistant", f"_({label} 반응 감지 — 그 판단 경로를 "
                                       f"{'강화' if fb>0 else '약화'}했어요)_"))
                 st.session_state.prev_feedback = fb
-
-        # 2) 반응이 아니면, 정보 제공인지 확인 (이름/선호 등 기억)
-        if fb is None:
-            shared = detect_shared_info(user_input, client=client, model=model)
-            if shared and hasattr(ts, "remember"):
-                ts.remember(shared, trust=1.0, context=user_input)
-                st.session_state.chat.append(
-                    ("assistant", f"기억했어요: {shared} 🔒"))
-                st.session_state.last_record = None
-                st.rerun()
 
         # 3) 반응도 정보도 아니면 새 질문으로 사고 진행
         if fb is None:
@@ -266,4 +267,3 @@ with col2:
 st.caption("처음엔 실수해도 됩니다. 답이 맘에 들면 '맞아', 아니면 '아니야'로 반응하세요. "
            "그 반응이 판단 경로를 강화/약화해, 점점 당신에게 맞는 사고로 자랍니다. "
            "이 궤적·전이가 곧 설명이자 정체성입니다.")
-

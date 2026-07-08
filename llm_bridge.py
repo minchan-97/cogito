@@ -147,3 +147,48 @@ def detect_feedback(user_message: str,
         except Exception:
             pass
     return None   # 중립·불명 → 학습 안 함
+
+
+# ── 정보 제공 감지 (사용자가 "기억해둬" 하는 것) ──
+def detect_shared_info(user_message: str,
+                       client=None, model: str = "gpt-4o-mini") -> str:
+    """
+    사용자가 자기 정보를 알려주는지 감지 → 기억할 내용 반환.
+    "내 이름은 민찬기야" → "사용자 이름은 민찬기"
+    질문이거나 정보가 아니면 "" 반환.
+    """
+    msg = user_message.strip()
+    # 1차: 명백한 패턴 (규칙)
+    import re
+    patterns = [
+        (r'내?\s*이름은?\s*([가-힣a-zA-Z]+)', lambda m: f"사용자 이름은 {m.group(1)}"),
+        (r'나는\s*(.+?)(를|을)\s*좋아', lambda m: f"사용자는 {m.group(1)}을(를) 좋아함"),
+        (r'나는\s*(.+?)(이|가)\s*싫', lambda m: f"사용자는 {m.group(1)}을(를) 싫어함"),
+        (r'나는\s*(.+?)(이야|야|입니다|이에요|예요)$', lambda m: f"사용자: {m.group(1)}"),
+        (r'내?\s*(취미|직업|나이|사는 곳|고향)은?\s*(.+)', lambda m: f"사용자 {m.group(1)}: {m.group(2)}"),
+    ]
+    for pat, fn in patterns:
+        m = re.search(pat, msg)
+        if m:
+            return fn(m).strip()
+
+    # 2차: LLM 판별 (애매할 때)
+    if client is not None:
+        try:
+            prompt = (
+                f"사용자 메시지: \"{user_message}\"\n\n"
+                f"이 메시지에서 사용자가 자신에 대한 정보(이름, 선호, 직업 등)를 "
+                f"알려주고 있나요? 있으면 '기억할 사실'을 한 문장으로, "
+                f"없으면(질문이거나 일반 대화면) 'NONE'만 답하세요.\n"
+                f"예: '내 이름은 민찬기야' → '사용자 이름은 민찬기'\n"
+                f"예: '오늘 날씨 어때?' → 'NONE'")
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0, max_tokens=40)
+            t = resp.choices[0].message.content.strip()
+            if t and "NONE" not in t.upper():
+                return t
+        except Exception:
+            pass
+    return ""

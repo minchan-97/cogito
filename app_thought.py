@@ -257,12 +257,16 @@ with col2:
     if _mem:
         st.markdown("---")
         st.markdown("**🧷 기억 (교정=확정, 나머지는 점차 망각)**")
-        for m in sorted(_mem, key=lambda x: -x["trust"]*x["strength"])[:6]:
-            tag = "🔒확정" if m["trust"] >= 1.0 else "📎참고"
-            bar = "▮" * max(1, int(m["strength"] * 6))
-            st.markdown(f"<small>{tag} {m['content'][:32]} "
-                        f"<span style='color:#999'>{bar}</span></small>",
-                        unsafe_allow_html=True)
+        for i, m in enumerate(sorted(_mem, key=lambda x: -x["trust"]*x["strength"])):
+            tag = "🔒" if m["trust"] >= 1.0 else "📎"
+            c1, c2 = st.columns([5, 1])
+            with c1:
+                st.markdown(f"<small>{tag} {m['content'][:40]}</small>",
+                            unsafe_allow_html=True)
+            with c2:
+                if st.button("🗑", key=f"del_mem_{i}_{m['content'][:8]}"):
+                    ts.memory.remove(m)
+                    st.rerun()
 
 st.caption("처음엔 실수해도 됩니다. 답이 맘에 들면 '맞아', 아니면 '아니야'로 반응하세요. "
            "그 반응이 판단 경로를 강화/약화해, 점점 당신에게 맞는 사고로 자랍니다. "

@@ -77,11 +77,14 @@ def make_answer_fn(client, node_map, model: str = "gpt-4o-mini"):
                    "\n".join(f"  - {d}" for d in directives)
 
         prompt = (
-            f"질문: {context}\n\n"
+            f"{context}\n\n"
             f"{proc}\n\n"
             f"위 절차는 당신의 사고 과정입니다. 절차대로 판단하되, "
             f"답변은 '1. 2. 3.' 같은 번호 나열이 아니라 자연스럽고 따뜻한 "
-            f"대화체로 쓰세요. 사람에게 말하듯 편하게. "
+            f"대화체로 쓰세요. 사람에게 말하듯 편하게.\n"
+            f"중요: 위에 '이전에 확인된 것'이나 '최근 대화 흐름'이 있으면, "
+            f"그 정보를 반드시 활용해 답하세요. 예를 들어 사용자 이름·취미 등이 "
+            f"기억에 있으면 그것을 근거로 답하세요. '모른다'고 하지 마세요.\n"
             f"만약 특정 자료·근거를 참고했다면, 답변 맨 끝에 별도 줄로 "
             f"'[근거: ...]' 형식으로 간단히 적으세요. 없으면 생략하세요.")
         try:
@@ -184,18 +187,25 @@ def detect_shared_info(user_message: str,
         try:
             prompt = (
                 f"사용자 메시지: \"{user_message}\"\n\n"
-                f"이 메시지가 사용자가 '자신에 대한 새 정보를 알려주는' 문장인가요?\n"
-                f"- 정보 제공(이름/선호/직업 등을 알려줌)이면 → 기억할 사실을 한 문장으로\n"
-                f"- 질문이거나(무엇/뭐/누구 등), 일반 대화면 → 'NONE'\n"
-                f"예: '내 이름은 민찬기야' → '사용자 이름은 민찬기'\n"
-                f"예: '내 이름 뭐라고 했지?' → 'NONE' (질문임)\n"
+                f"이 메시지에서 '나중에 기억해야 할 사용자 정보'만 뽑아주세요.\n"
+                f"규칙:\n"
+                f"- 정보가 있으면: 사실만 간결히. 목록이면 항목을 그대로 나열.\n"
+                f"- 질문이거나 정보가 없으면: 'NONE'\n"
+                f"- 절대 '~이므로', '~를 제공하고 있다', '기억하겠다' 같은 "
+                f"설명·판단은 쓰지 마세요. 사실 그 자체만.\n\n"
+                f"예: '내 이름은 민찬기야' → '이름: 민찬기'\n"
+                f"예: '내 시계는 롤렉스, 오메가, 세이코야' → '시계: 롤렉스, 오메가, 세이코'\n"
+                f"예: '내 시계 뭐라고 했지?' → 'NONE'\n"
                 f"예: '오늘 날씨 어때?' → 'NONE'")
             resp = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.0, max_tokens=40)
+                temperature=0.0, max_tokens=150)
             t = resp.choices[0].message.content.strip()
-            if t and "NONE" not in t.upper():
+            # 메타 설명이 섞였으면 거른다 (안전장치)
+            bad_markers = ["이므로", "제공하고", "기억할", "기억하겠", "따라서",
+                           "메시지는", "메시지가", "알려주고 있"]
+            if t and "NONE" not in t.upper() and not any(b in t for b in bad_markers):
                 return t
         except Exception:
             pass

@@ -16,7 +16,7 @@ import os, sys
 sys.path.append(os.path.dirname(__file__))
 
 from thought_structure import ThoughtStructure, JudgmentNode
-from llm_bridge import make_client, make_choose_fn, make_answer_fn, detect_feedback
+from llm_bridge import make_client, make_choose_fn, make_answer_fn, detect_feedback, detect_shared_info
 
 st.set_page_config(page_title="사고 구조", layout="wide")
 st.title("🧠 사고 구조 — 판단 트리 위를 걷는 LLM")
@@ -167,20 +167,38 @@ with col1:
                                       f"{'강화' if fb>0 else '약화'}했어요)_"))
                 st.session_state.prev_feedback = fb
 
-        # 2) 반응이 아니면 새 질문으로 사고 진행
+        # 2) 반응이 아니면, 정보 제공인지 확인 (이름/선호 등 기억)
+        if fb is None:
+            shared = detect_shared_info(user_input, client=client, model=model)
+            if shared and hasattr(ts, "remember"):
+                ts.remember(shared, trust=1.0, context=user_input)
+                st.session_state.chat.append(
+                    ("assistant", f"기억했어요: {shared} 🔒"))
+                st.session_state.last_record = None
+                st.rerun()
+
+        # 3) 반응도 정보도 아니면 새 질문으로 사고 진행
         if fb is None:
             choose_fn = make_choose_fn(client, model=model)
             answer_fn = make_answer_fn(client, ts.nodes, model=model)
-            # 관련 기억을 불러와 맥락에 주입 (기억흐름)
+            # 관련 기억 + 대화 흐름을 맥락에 주입
             mem_ctx = ts.memory_context(user_input) if hasattr(ts, "memory_context") else ""
-            full_context = user_input
+            flow_ctx = ts.recent_context(6) if hasattr(ts, "recent_context") else ""
+            parts = []
+            if flow_ctx:
+                parts.append(flow_ctx)
             if mem_ctx:
-                full_context = f"{mem_ctx}\n\n질문: {user_input}"
+                parts.append(mem_ctx)
+            parts.append(f"질문: {user_input}")
+            full_context = "\n\n".join(parts)
             with st.spinner("판단 트리 위를 이동 중..."):
                 rec = ts.traverse(choose_fn=choose_fn, answer_fn=answer_fn,
                                   context=full_context)
             # 기록엔 원래 질문만 (감사 로그 깔끔하게)
             rec.context = user_input
+            # 대화 맥락에 흡수 (흐름 유지)
+            if hasattr(ts, "add_episode"):
+                ts.add_episode(user_input, rec.answer)
             st.session_state.last_record = rec
             st.session_state.prev_feedback = 0
             st.session_state.chat.append(("assistant", rec.answer))
@@ -248,4 +266,3 @@ with col2:
 st.caption("처음엔 실수해도 됩니다. 답이 맘에 들면 '맞아', 아니면 '아니야'로 반응하세요. "
            "그 반응이 판단 경로를 강화/약화해, 점점 당신에게 맞는 사고로 자랍니다. "
            "이 궤적·전이가 곧 설명이자 정체성입니다.")
-

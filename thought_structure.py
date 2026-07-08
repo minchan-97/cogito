@@ -216,9 +216,16 @@ class ThoughtStructure:
                             ((np.linalg.norm(qv)*np.linalg.norm(mv))+1e-12))
             else:
                 import re
+                # 조사 차이 극복: 앞 2글자 어간 매칭도 인정
                 qw = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', query))
                 mw = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', m["content"]))
-                sim = len(qw & mw) / (len(qw)+1e-9) if qw else 0
+                hits = 0
+                for q in qw:
+                    for w in mw:
+                        if q == w or (len(q) >= 2 and len(w) >= 2 and q[:2] == w[:2]):
+                            hits += 1
+                            break
+                sim = hits / (len(qw)+1e-9) if qw else 0
             # 관련도 × 신뢰 × 강도
             score = sim * m["trust"] * m["strength"]
             if score > 0.05:
@@ -310,4 +317,3 @@ class ThoughtStructure:
         ts.history = [PathRecord(**r) for r in blob["history"]]
         ts.memory = blob.get("memory", [])   # 구버전 호환
         return ts
-

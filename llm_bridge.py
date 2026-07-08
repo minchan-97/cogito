@@ -158,14 +158,21 @@ def detect_shared_info(user_message: str,
     질문이거나 정보가 아니면 "" 반환.
     """
     msg = user_message.strip()
+    # 질문이면 정보 제공 아님 (질문을 기억으로 저장하는 오류 방지)
+    question_markers = ['뭐', '무엇', '누구', '어디', '언제', '왜', '어떻', '?',
+                        '뭘', '몇', '했지', '했더라', '이야?', '야?', '까?']
+    if any(qm in msg for qm in question_markers):
+        return ""
+
     # 1차: 명백한 패턴 (규칙)
     import re
     patterns = [
-        (r'내?\s*이름은?\s*([가-힣a-zA-Z]+)', lambda m: f"사용자 이름은 {m.group(1)}"),
-        (r'나는\s*(.+?)(를|을)\s*좋아', lambda m: f"사용자는 {m.group(1)}을(를) 좋아함"),
-        (r'나는\s*(.+?)(이|가)\s*싫', lambda m: f"사용자는 {m.group(1)}을(를) 싫어함"),
-        (r'나는\s*(.+?)(이야|야|입니다|이에요|예요)$', lambda m: f"사용자: {m.group(1)}"),
-        (r'내?\s*(취미|직업|나이|사는 곳|고향)은?\s*(.+)', lambda m: f"사용자 {m.group(1)}: {m.group(2)}"),
+        (r'^내?\s*이름(은|는)\s*([가-힣a-zA-Z]{2,})(이야|야|입니다|이에요|예요)?$',
+         lambda m: f"사용자 이름은 {m.group(2)}"),
+        (r'나는?\s*(.+?)(를|을)\s*좋아', lambda m: f"사용자는 {m.group(1)}을(를) 좋아함"),
+        (r'나는?\s*(.+?)(이|가)\s*싫', lambda m: f"사용자는 {m.group(1)}을(를) 싫어함"),
+        (r'내?\s*(취미|직업|나이|고향|사는\s*곳)(은|는)\s*(.+?)(이야|야|입니다|이에요|예요|있어)?$',
+         lambda m: f"사용자 {m.group(1)}: {m.group(3)}"),
     ]
     for pat, fn in patterns:
         m = re.search(pat, msg)
@@ -177,10 +184,11 @@ def detect_shared_info(user_message: str,
         try:
             prompt = (
                 f"사용자 메시지: \"{user_message}\"\n\n"
-                f"이 메시지에서 사용자가 자신에 대한 정보(이름, 선호, 직업 등)를 "
-                f"알려주고 있나요? 있으면 '기억할 사실'을 한 문장으로, "
-                f"없으면(질문이거나 일반 대화면) 'NONE'만 답하세요.\n"
+                f"이 메시지가 사용자가 '자신에 대한 새 정보를 알려주는' 문장인가요?\n"
+                f"- 정보 제공(이름/선호/직업 등을 알려줌)이면 → 기억할 사실을 한 문장으로\n"
+                f"- 질문이거나(무엇/뭐/누구 등), 일반 대화면 → 'NONE'\n"
                 f"예: '내 이름은 민찬기야' → '사용자 이름은 민찬기'\n"
+                f"예: '내 이름 뭐라고 했지?' → 'NONE' (질문임)\n"
                 f"예: '오늘 날씨 어때?' → 'NONE'")
             resp = client.chat.completions.create(
                 model=model,

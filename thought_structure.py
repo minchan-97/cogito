@@ -67,6 +67,9 @@ class ThoughtStructure:
         #   trust: 1.0 TRUST_HUMAN(교정/승인) / 0.6 DERIVED / 0.2 DOUBTED
         #   strength: 망각 대상 (안 쓰이면 감소, 쓰이면 회복)
         self.memory: List[dict] = []
+        # 대화 맥락 (episodic) — 예전 selfloop 방식. 흐름 유지용.
+        #   각 항목: {q, a, timestamp}
+        self.episodic: List[dict] = []
 
     # ── 트리 구성 ──
     def add_node(self, node: JudgmentNode, is_root=False):
@@ -262,6 +265,26 @@ class ThoughtStructure:
             lines.append(f"[{tag}] {m['content']}")
         return "이전에 확인된 것:\n" + "\n".join(lines)
 
+    # ── 대화 맥락 (episodic) — 흐름 유지 ──
+    def add_episode(self, question: str, answer: str):
+        """대화 한 턴을 맥락에 쌓는다 (예전 selfloop 방식)."""
+        from datetime import datetime
+        self.episodic.append({
+            "q": question[:120], "a": answer[:200],
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        })
+        # 너무 길어지면 오래된 것 정리 (최근 30턴만 원문 유지)
+        if len(self.episodic) > 30:
+            self.episodic = self.episodic[-30:]
+
+    def recent_context(self, n: int = 6) -> str:
+        """최근 n턴의 대화 흐름을 프롬프트용 문자열로."""
+        if not self.episodic:
+            return ""
+        recent = self.episodic[-n:]
+        lines = [f"사용자: {e['q']}\n나: {e['a']}" for e in recent]
+        return "최근 대화 흐름:\n" + "\n---\n".join(lines)
+
     # ── 정체성 지표 ──
     def dominant_path(self) -> list:
         """현재 가장 강한 판단 경로 = 이 정체성의 기본 사고."""
@@ -300,6 +323,7 @@ class ThoughtStructure:
             "lr": self.lr, "continuity": self.continuity,
             "history": [r.__dict__ for r in self.history],
             "memory": self.memory,
+            "episodic": self.episodic,
         }
         with open(path, "wb") as f:
             pickle.dump(blob, f)
@@ -316,5 +340,5 @@ class ThoughtStructure:
         ts.root_id = blob["root_id"]
         ts.history = [PathRecord(**r) for r in blob["history"]]
         ts.memory = blob.get("memory", [])   # 구버전 호환
+        ts.episodic = blob.get("episodic", [])  # 대화 맥락 복원
         return ts
-

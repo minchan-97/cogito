@@ -210,3 +210,41 @@ def detect_shared_info(user_message: str,
         except Exception:
             pass
     return ""
+
+
+# ── 새 유형 사고 트리 생성 (extract_reasoning_pattern을 LLM으로) ──
+def make_tree_designer(client, model: str = "gpt-4o-mini"):
+    """
+    새 유형이 감지되면, LLM이 그 유형에 맞는 판단 단계(트리)를 설계.
+    1년 전 설계의 extract_reasoning_pattern + map_to_function_template를 LLM으로.
+    반환: design_fn(question, type_hint) -> {"type_id", "nodes"}
+    """
+    import json as _json
+
+    def design_fn(question: str, type_hint: str = ""):
+        prompt = (
+            f"질문: \"{question}\"\n\n"
+            f"이 질문에 답하려면 어떤 '판단 단계'를 거쳐야 하는지 사고 절차를 설계하세요.\n"
+            f"2~3개의 순차적 판단 단계로 나누고, 각 단계에 구체적 지시를 쓰세요.\n"
+            f"JSON만 출력 (설명 없이):\n"
+            f'{{"type_id": "유형이름(영문소문자)", '
+            f'"steps": [{{"name": "단계명", "directive": "이 단계에서 할 구체적 지시"}}]}}\n\n'
+            f"예: 비교 질문 → "
+            f'{{"type_id": "compare", "steps": ['
+            f'{{"name": "대상 파악", "directive": "무엇과 무엇을 비교하는지 명확히 한다"}}, '
+            f'{{"name": "기준 설정", "directive": "어떤 기준으로 비교할지 정한다"}}, '
+            f'{{"name": "종합 판단", "directive": "각 기준별 차이를 종합해 결론낸다"}}]}}')
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3, max_tokens=300)
+            t = resp.choices[0].message.content.strip()
+            t = t.replace("```json", "").replace("```", "").strip()
+            data = _json.loads(t)
+            if "type_id" in data and "steps" in data and data["steps"]:
+                return data
+        except Exception:
+            pass
+        return None
+    return design_fn

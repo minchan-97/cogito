@@ -213,6 +213,9 @@ class ThoughtStructure:
                                 context=retry_context)
         rec.verified = self.verify(rec)["ok"]
         return rec
+
+    # ── 대화 반응으로 학습 (전이 강화/약화) ──
+    def learn(self, record: PathRecord, feedback: float):
         """
         feedback: +1(긍정) ~ -1(부정)
         지나간 경로의 전이를 강화(긍정) 또는 약화(부정).

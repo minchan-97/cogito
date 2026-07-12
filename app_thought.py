@@ -77,8 +77,23 @@ if uploaded is not None:
         restored = load_identity_from_bytes(uploaded.getvalue())
         if restored is not None:
             st.session_state.ts = restored
+            # 통합 pkl이면 registry도 복원
+            try:
+                import pickle as _p
+                _blob = _p.loads(uploaded.getvalue())
+                if isinstance(_blob, dict) and "__registry__" in _blob:
+                    from tree_registry import TreeRegistry as _TR
+                    st.session_state.registry = _TR.from_blob(_blob["__registry__"])
+                else:
+                    # 옛 pkl (registry 없음) → logic_db로 초기화
+                    from tree_registry import TreeRegistry as _TR, load_logic_db_types
+                    st.session_state.registry = _TR()
+                    load_logic_db_types(st.session_state.registry)
+            except Exception:
+                pass
             st.session_state.chat = []
             st.session_state.last_record = None
+            st.session_state.pending_feedback = False
             st.session_state.loaded_sig = sig
             st.success(f"✅ 정체성 복원됨 (학습 {len(restored.history)}회)")
         else:
@@ -102,6 +117,14 @@ if "registry" not in st.session_state:
 registry = st.session_state.registry
 
 ts.save("/tmp/identity.pkl")
+# registry(유형 트리 + 생성 로그)도 같은 pkl에 통합 저장
+import pickle as _pkl_mod
+with open("/tmp/identity.pkl", "rb") as f:
+    _base_blob = _pkl_mod.load(f)
+if hasattr(registry, "to_blob"):
+    _base_blob["__registry__"] = registry.to_blob()
+with open("/tmp/identity.pkl", "wb") as f:
+    _pkl_mod.dump(_base_blob, f)
 with open("/tmp/identity.pkl", "rb") as f:
     _pkl_bytes = f.read()
 st.download_button("⬇️ 정체성 다운로드 (identity.pkl)", data=_pkl_bytes,
@@ -252,4 +275,3 @@ with col2:
                         unsafe_allow_html=True)
 
 st.caption("Arcogit — 사고가 곧 존재, 궤적이 곧 정체성. 답에 👍/👎로 반응하면 학습됩니다.")
-

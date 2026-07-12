@@ -1,0 +1,142 @@
+[
+  {
+    "id": 1,
+    "name": "Syllogism",
+    "type": "deductive",
+    "description": "General to specific reasoning",
+    "expression": "if A implies B and B implies C, then A implies C"
+  },
+  {
+    "id": 2,
+    "name": "Induction",
+    "type": "inductive",
+    "description": "Specific to general reasoning",
+    "expression": "observe patterns → generalize a rule"
+  },
+  {
+    "id": 3,
+    "name": "Hypothetical Reasoning",
+    "type": "conditional",
+    "description": "If-then reasoning",
+    "expression": "if P then Q; P is true → Q is true"
+  },
+  {
+    "id": 4,
+    "name": "Dialectic",
+    "type": "synthesis",
+    "description": "Thesis + antithesis → synthesis",
+    "expression": "thesis + antithesis → synthesis"
+  },
+  {
+    "id": 5,
+    "name": "Reductio ad absurdum",
+    "type": "paradox",
+    "description": "Assume not-P → contradiction → P is true",
+    "expression": "assume not-P → contradiction → P is true"
+  },
+  {
+    "id": 6,
+    "name": "Analogy",
+    "type": "analogical",
+    "description": "Inference based on similarity",
+    "expression": "A is to B as C is to D"
+  },
+  {
+    "id": 7,
+    "name": "Categorical Reasoning",
+    "type": "deductive",
+    "description": "Category inclusion",
+    "expression": "All A are B; all B are C → All A are C"
+  },
+  {
+    "id": 8,
+    "name": "Double Negation",
+    "type": "formal",
+    "description": "¬(¬P) = P",
+    "expression": "not (not P) is equivalent to P"
+  },
+  {
+    "id": 9,
+    "name": "Disjunction",
+    "type": "choice",
+    "description": "A or B",
+    "expression": "if not A, then B"
+  },
+  {
+    "id": 10,
+    "name": "Conditional Elimination",
+    "type": "inference rule",
+    "description": "if P then Q, P → Q",
+    "expression": "modus ponens"
+  },
+  {
+    "id": 11,
+    "name": "Conditional Chain",
+    "type": "chain",
+    "description": "if A then B, if B then C → if A then C",
+    "expression": "hypothetical syllogism"
+  },
+  {
+    "id": 12,
+    "name": "Modus Tollens",
+    "type": "reverse inference",
+    "description": "if P then Q, not Q → not P",
+    "expression": "contrapositive reasoning"
+  },
+  {
+    "id": 13,
+    "name": "Dilemma",
+    "type": "binary choice",
+    "description": "either P or Q, if P then R, if Q then R → R",
+    "expression": "constructive dilemma"
+  },
+  {
+    "id": 14,
+    "name": "Circular Reasoning",
+    "type": "informal fallacy",
+    "description": "P is true because P is true",
+    "expression": "P is true because P is true"
+  },
+  {
+    "id": 15,
+    "name": "Hasty Generalization",
+    "type": "inductive fallacy",
+    "description": "Overgeneralization from specific instances",
+    "expression": "2 people like it → everyone does"
+  },
+  {
+    "id": 16,
+    "name": "Correlation ≠ Causation",
+    "type": "causal fallacy",
+    "description": "Co-occurrence doesn't imply causation",
+    "expression": "A and B occur together → A causes B?"
+  },
+  {
+    "id": 17,
+    "name": "Trolley Problem Logic",
+    "type": "moral reasoning",
+    "description": "Consequences vs principles",
+    "expression": "save 5 vs kill 1"
+  },
+  {
+    "id": 18,
+    "name": "Symbolic Logic",
+    "type": "formalization",
+    "description": "Apply logical symbols",
+    "expression": "P ∧ Q → R"
+  },
+  {
+    "id": 19,
+    "name": "Reverse Analogy",
+    "type": "analogical",
+    "description": "Interpret A via D by B and D similarity",
+    "expression": "if A:B = C:D → infer about A via D"
+  },
+  {
+    "id": 20,
+    "name": "Priority Reasoning",
+    "type": "contextual logic",
+    "description": "Prioritize condition A over B",
+    "expression": "choose based on weight/context"
+  }
+]

@@ -70,6 +70,14 @@ class ThoughtStructure:
         # 대화 맥락 (episodic) — 예전 selfloop 방식. 흐름 유지용.
         #   각 항목: {q, a, timestamp}
         self.episodic: List[dict] = []
+        # 양심 (정체성 통합 관문) — 지연 생성
+        self._conscience = None
+
+    def _get_conscience(self):
+        if self._conscience is None:
+            from conscience import Conscience
+            self._conscience = Conscience()
+        return self._conscience
 
     # ── 트리 구성 ──
     def add_node(self, node: JudgmentNode, is_root=False):
@@ -166,27 +174,42 @@ class ThoughtStructure:
             self._normalize(frm)
 
     # ── 의미 기억 (기억흐름 + 망각) ──
-    def remember(self, content: str, trust: float = 0.6, context: str = ""):
+    def remember(self, content: str, trust: float = 0.6, context: str = "",
+                 use_conscience: bool = True):
         """
         기억할 가치 있는 것만 저장. 아무거나 다 저장 안 함 (망각 철학).
         trust: 1.0 인간교정/승인 / 0.6 파생 / 0.2 의심
         같은 내용 있으면 신뢰·강도만 갱신.
+
+        use_conscience=True면, 확정 기억(trust>=1.0)은 양심 관문을 거친다.
+        기존 정체성과 충돌하면 격리(소화 보류) — 분열 방지.
+        반환: 실제 저장됐으면 True, 격리/거부면 False.
         """
         from datetime import datetime
         content = content.strip()
         if not content:
-            return
+            return False
         # 중복 체크 (간단히 포함 관계)
         for m in self.memory:
             if content in m["content"] or m["content"] in content:
                 m["trust"] = max(m["trust"], trust)
                 m["strength"] = 1.0   # 다시 언급됐으니 회복
-                return
+                return True
+
+        # 양심 관문 (정체성 축이 되는 확정 기억만)
+        if use_conscience and trust >= 1.0:
+            verdict = self._get_conscience().evaluate(content, self.memory)
+            if verdict.action == "quarantine":
+                return False   # 소화 대기 — 아직 정체성에 안 넣음
+            if verdict.action == "reject":
+                return False   # 정체성 급변 위험 — 거부
+
         self.memory.append({
             "content": content, "trust": trust, "strength": 1.0,
             "context": context,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
         })
+        return True
 
     def remember_from_correction(self, record: PathRecord, prev_record: PathRecord):
         """
@@ -324,6 +347,7 @@ class ThoughtStructure:
             "history": [r.__dict__ for r in self.history],
             "memory": self.memory,
             "episodic": self.episodic,
+            "quarantine": self._conscience.quarantine if self._conscience else [],
         }
         with open(path, "wb") as f:
             pickle.dump(blob, f)
@@ -341,4 +365,7 @@ class ThoughtStructure:
         ts.history = [PathRecord(**r) for r in blob["history"]]
         ts.memory = blob.get("memory", [])   # 구버전 호환
         ts.episodic = blob.get("episodic", [])  # 대화 맥락 복원
+        q = blob.get("quarantine", [])   # 양심 격리소 복원
+        if q:
+            ts._get_conscience().quarantine = q
         return ts

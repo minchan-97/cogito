@@ -161,15 +161,37 @@ class TreeRegistry:
 
     # ── 저장/복원 (모든 유형 트리 + 성숙도 지속) ──
     def save(self, path: str):
-        blob = {
+        with open(path, "wb") as f:
+            pickle.dump(self.to_blob(), f)
+        return path
+
+    def to_blob(self) -> dict:
+        """registry를 dict로 (통합 pkl에 끼워넣기용)."""
+        return {
             "trees": {tid: self._tree_blob(t) for tid, t in self.trees.items()},
             "type_examples": self.type_examples,
             "usage_count": self.usage_count,
             "creation_log": self.creation_log,
         }
-        with open(path, "wb") as f:
-            pickle.dump(blob, f)
-        return path
+
+    @classmethod
+    def from_blob(cls, blob: dict) -> "TreeRegistry":
+        """dict에서 registry 복원 (통합 pkl에서 꺼내기용)."""
+        from thought_structure import PathRecord
+        reg = cls()
+        for tid, tb in blob.get("trees", {}).items():
+            t = ThoughtStructure(learning_rate=tb["lr"], continuity=tb["continuity"])
+            for k, v in tb["nodes"].items():
+                t.nodes[k] = JudgmentNode(**v)
+            t.transitions = tb["transitions"]
+            t.root_id = tb["root_id"]
+            t.history = [PathRecord(**r) for r in tb["history"]]
+            t.memory = tb.get("memory", [])
+            reg.trees[tid] = t
+        reg.type_examples = blob.get("type_examples", {})
+        reg.usage_count = blob.get("usage_count", {})
+        reg.creation_log = blob.get("creation_log", [])
+        return reg
 
     @staticmethod
     def _tree_blob(t: ThoughtStructure) -> dict:

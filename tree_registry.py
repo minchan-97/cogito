@@ -199,3 +199,50 @@ class TreeRegistry:
         reg.type_examples = blob.get("type_examples", {})
         reg.usage_count = blob.get("usage_count", {})
         return reg
+
+
+def load_logic_db_types(registry, db_path: str = "logic_db.json"):
+    """
+    1년 전 logic_db.json의 논리 유형들을 registry의 초기 사고 트리로 로드.
+    각 논리 유형(삼단논법, 귀납 등)을 판단 트리로 변환.
+    오류 유형(순환논증 등)은 '피해야 할 것'으로 directive에 명시.
+    """
+    import json, os
+    if not os.path.exists(db_path):
+        return 0
+    try:
+        db = json.load(open(db_path, encoding="utf-8"))
+    except Exception:
+        return 0
+
+    fallacy_types = {"informal fallacy", "inductive fallacy", "causal fallacy"}
+    loaded = 0
+    for entry in db:
+        type_id = entry["name"].lower().replace(" ", "_").replace("≠", "not")
+        if type_id in registry.trees:
+            continue
+        is_fallacy = entry.get("type", "") in fallacy_types
+
+        tree = ThoughtStructure(learning_rate=0.12, continuity=0.7)
+        # 논리 유형 → 3단 사고 트리
+        tree.add_node(JudgmentNode(
+            f"{type_id}_0", f"{entry['name']} 적용 판단",
+            directive=f"이 질문에 '{entry['name']}'({entry['description']}) "
+                      f"논리를 적용할지 판단한다."), is_root=True)
+        if is_fallacy:
+            # 오류 유형은 '감지·회피' 트리
+            tree.add_node(JudgmentNode(
+                f"{type_id}_1", "오류 회피",
+                directive=f"'{entry['name']}'은 논리적 오류다({entry['expression']}). "
+                          f"이 오류에 빠지지 않았는지 점검하고 피한다.",
+                is_terminal=True))
+        else:
+            tree.add_node(JudgmentNode(
+                f"{type_id}_1", f"{entry['name']} 추론",
+                directive=f"{entry['expression']} 형식으로 추론한다.",
+                is_terminal=True))
+        tree.add_branch(f"{type_id}_0", f"{type_id}_1", 1.0)
+
+        registry.register_type(type_id, tree, examples=[entry["description"]])
+        loaded += 1
+    return loaded

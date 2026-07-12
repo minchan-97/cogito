@@ -46,6 +46,7 @@ class PathRecord:
     context: str = ""           # 입력 질문 (감사: 무엇에 답했나)
     sources: list = field(default_factory=list)  # 가져온 근거 자료 (감사: 무엇을 근거로)
     timestamp: str = ""         # 시각 (감사: 언제)
+    verified: bool = True       # 자기검증 통과 여부
 
 
 class ThoughtStructure:
@@ -151,8 +152,67 @@ class ThoughtStructure:
                          timestamp=datetime.now().isoformat(timespec="seconds"))
         return rec
 
-    # ── 대화 반응으로 학습 (전이 강화/약화) ──
-    def learn(self, record: PathRecord, feedback: float):
+    # ── 자기검증 (옛 설계 self_verify) ──
+    def verify(self, record: PathRecord) -> dict:
+        """
+        생성된 답이 기존 확정 기억(정체성)과 모순되지 않는지 검증.
+        옛 설계의 self_verify(G_t)를 오늘 구조로: 답 내기 전 자기 일관성 점검.
+        반환: {"ok": bool, "reason": str, "conflicts": list}
+        """
+        answer = record.answer or ""
+        if not answer or not self.memory:
+            return {"ok": True, "reason": "검증 대상 없음", "conflicts": []}
+
+        import re
+        ans_words = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', answer))
+        conflicts = []
+        for m in self.memory:
+            if m.get("trust", 0) < 1.0:   # 확정 기억만 기준
+                continue
+            mem_words = set(re.findall(r'[가-힣a-zA-Z0-9]{2,}', m["content"]))
+            overlap = ans_words & mem_words
+            if not overlap:
+                continue
+            # 답이 확정 기억과 같은 주제를 다루는데, 값이 모순되나
+            ans_only = ans_words - mem_words
+            mem_only = mem_words - ans_words
+            if overlap and mem_only:
+                # 기억의 핵심값이 답에 없고, 다른 값이 있으면 모순 가능성
+                value_variant = any(
+                    len(a) >= 2 and len(mv) >= 2 and a[:2] == mv[:2]
+                    for a in ans_only for mv in mem_only)
+                topic_strength = len(overlap) / (min(len(ans_words), len(mem_words)) + 1e-9)
+                if topic_strength > 0.3 and mem_only and not value_variant:
+                    # 확정 기억의 값이 답에서 누락/모순
+                    if not (mem_only & ans_words):
+                        conflicts.append(m["content"][:40])
+        ok = len(conflicts) == 0
+        return {
+            "ok": ok,
+            "reason": "일관됨" if ok else f"확정 기억과 모순 {len(conflicts)}건",
+            "conflicts": conflicts,
+        }
+
+    def traverse_verified(self, choose_fn=None, answer_fn=None,
+                          context="", max_retry: int = 1) -> PathRecord:
+        """
+        자기검증 포함 사고 (옛 설계: 검증 실패 시 recalculate).
+        답 생성 → 검증 → 모순이면 재사고(재계산). max_retry회까지.
+        """
+        rec = self.traverse(choose_fn=choose_fn, answer_fn=answer_fn, context=context)
+        for attempt in range(max_retry):
+            v = self.verify(rec)
+            if v["ok"]:
+                rec.verified = True
+                return rec
+            # 검증 실패 → 재계산 (기억을 더 강하게 상기시켜 다시)
+            retry_context = (
+                f"{context}\n\n[주의: 다음 확정 사실과 모순되지 않게 답하라: "
+                f"{', '.join(v['conflicts'])}]")
+            rec = self.traverse(choose_fn=choose_fn, answer_fn=answer_fn,
+                                context=retry_context)
+        rec.verified = self.verify(rec)["ok"]
+        return rec
         """
         feedback: +1(긍정) ~ -1(부정)
         지나간 경로의 전이를 강화(긍정) 또는 약화(부정).

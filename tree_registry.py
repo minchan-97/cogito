@@ -34,6 +34,8 @@ class TreeRegistry:
         self.trees: Dict[str, ThoughtStructure] = {}
         self.type_examples: Dict[str, List[str]] = {}   # 유형별 예시 질문 (판별용)
         self.usage_count: Dict[str, int] = {}
+        # 유형 생성 감사 로그 (언제/왜/어떤 유형이 생겼나)
+        self.creation_log: List[dict] = []
 
     def register_type(self, type_id: str, tree: ThoughtStructure,
                       examples: List[str] = None):
@@ -96,6 +98,55 @@ class TreeRegistry:
         self.usage_count[type_id] = self.usage_count.get(type_id, 0) + 1
         return self.trees[type_id]
 
+    def create_from_design(self, design: dict, question: str,
+                           reason: str = "새 유형 감지") -> Optional[str]:
+        """
+        LLM이 설계한 사고 단계(design)로 새 트리를 생성하고 감사 로그에 남긴다.
+        design: {"type_id": str, "steps": [{"name","directive"}, ...]}
+        반환: 생성된 type_id (실패 시 None)
+        """
+        from datetime import datetime
+        if not design or "type_id" not in design or "steps" not in design:
+            return None
+        type_id = design["type_id"]
+        if type_id in self.trees:
+            return type_id   # 이미 있으면 그대로
+
+        steps = design["steps"]
+        if not steps:
+            return None
+
+        # 설계를 실제 트리로 (순차 단계 → 노드 체인)
+        tree = ThoughtStructure(learning_rate=0.12, continuity=0.7)
+        prev_id = None
+        for i, step in enumerate(steps):
+            nid = f"{type_id}_{i}"
+            is_last = (i == len(steps) - 1)
+            node = JudgmentNode(
+                nid, step.get("name", f"단계{i+1}"),
+                directive=step.get("directive", ""),
+                is_terminal=is_last)
+            tree.add_node(node, is_root=(i == 0))
+            if prev_id is not None:
+                tree.add_branch(prev_id, nid, 1.0)
+            prev_id = nid
+
+        self.register_type(type_id, tree, examples=[question])
+
+        # 감사 로그 (언제/왜/어떤 유형이/어떤 구조로 생겼나)
+        self.creation_log.append({
+            "type_id": type_id,
+            "reason": reason,
+            "trigger_question": question[:60],
+            "steps": [s.get("name", "") for s in steps],
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        })
+        return type_id
+
+    def creation_history(self) -> List[dict]:
+        """유형 생성 감사 로그 (무엇이 언제 왜 생겼나)."""
+        return self.creation_log
+
     def stats(self) -> dict:
         """유형별 성숙도 (재사용·학습 횟수)."""
         return {
@@ -114,6 +165,7 @@ class TreeRegistry:
             "trees": {tid: self._tree_blob(t) for tid, t in self.trees.items()},
             "type_examples": self.type_examples,
             "usage_count": self.usage_count,
+            "creation_log": self.creation_log,
         }
         with open(path, "wb") as f:
             pickle.dump(blob, f)

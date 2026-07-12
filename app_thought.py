@@ -193,8 +193,8 @@ with col1:
             parts.append(f"질문: {user_input}")
             full_context = "\n\n".join(parts)
             with st.spinner("판단 트리 위를 이동 중..."):
-                rec = ts.traverse(choose_fn=choose_fn, answer_fn=answer_fn,
-                                  context=full_context)
+                rec = ts.traverse_verified(choose_fn=choose_fn, answer_fn=answer_fn,
+                                           context=full_context, max_retry=1)
             # 기록엔 원래 질문만 (감사 로그 깔끔하게)
             rec.context = user_input
             # 대화 맥락에 흡수 (흐름 유지)
@@ -218,6 +218,9 @@ with col2:
                         unsafe_allow_html=True)
         if getattr(rec, 'timestamp', ''):
             st.markdown(f"<small>🕐 {rec.timestamp}</small>", unsafe_allow_html=True)
+        if hasattr(rec, 'verified'):
+            vtag = "✅ 자기검증 통과" if rec.verified else "⚠️ 검증 미통과(재계산함)"
+            st.markdown(f"<small>{vtag}</small>", unsafe_allow_html=True)
         if getattr(rec, 'sources', None):
             st.markdown(f"<small>📚 근거: {', '.join(rec.sources)[:60]}</small>",
                         unsafe_allow_html=True)

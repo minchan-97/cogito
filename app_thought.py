@@ -1,27 +1,24 @@
 """
-app_thought.py — 사고 구조 아키텍처 (Streamlit)
+app_thought.py — Arcogit (사고 구조 아키텍처)
 
-LLM이 판단 분기 트리 위를 이동하며 답한다.
-사고 궤적(XAI)이 보이고, 사용자 반응으로 전이가 학습된다(정체성 성장).
-
-실행:
-  pip install streamlit openai
-  streamlit run app_thought.py
-
-  - GPT: 사이드바에 OpenAI Key
-  - Ollama(로컬): "로컬 LLM" 체크 (http://localhost:11434)
+- 사고 궤적 = 감사 로그 / 학습된 전이 = 정체성
+- 피드백은 답 아래 👍/👎 버튼 (수동 텍스트 반응 X)
+- 기억 자동 (정보 제공 감지) / 유형 자동 생성 (LLM 설계 + 감사 로그)
+- 양심 (정체성 통합) + 자기검증 (답 일관성)
 """
 import streamlit as st
 import os, sys
 sys.path.append(os.path.dirname(__file__))
 
 from thought_structure import ThoughtStructure, JudgmentNode
-from llm_bridge import make_client, make_choose_fn, make_answer_fn, detect_feedback, detect_shared_info
+from tree_registry import TreeRegistry
+from llm_bridge import (make_client, make_choose_fn, make_answer_fn,
+                        detect_shared_info, make_tree_designer)
 
-st.set_page_config(page_title="사고 구조", layout="wide")
-st.title("🧠 사고 구조 — 판단 트리 위를 걷는 LLM")
-st.caption("LLM이 판단 분기 트리를 따라 이동하며 답한다. 궤적이 곧 설명(XAI), "
-           "학습된 전이가 곧 정체성. 반응으로 실수에서 벗어난다.")
+st.set_page_config(page_title="Arcogit", layout="wide")
+st.title("🧠 Arcogit — 사고 구조 위를 걷는 정체성")
+st.caption("판단 트리를 따라 사고하고, 기억하고, 스스로 유형을 만들며 자란다. "
+           "궤적=감사, 전이=정체성. 답이 맘에 들면 👍, 아니면 👎.")
 
 with st.sidebar:
     st.markdown("### 설정")
@@ -30,71 +27,50 @@ with st.sidebar:
     model = st.text_input("모델", value="llama3.2:3b" if local else "gpt-4o-mini")
     lr = st.slider("학습률", 0.05, 0.3, 0.15, 0.05)
     continuity = st.slider("정체성 유지", 0.5, 0.95, 0.7, 0.05)
+    auto_type = st.checkbox("유형 자동 생성", value=True,
+                            help="새 유형 질문이 오면 LLM이 사고 트리를 설계해 생성")
 
-# 정체성 이어가기 (본문 상단 — 모바일에서도 보이게)
 with st.expander("💾 정체성 저장 / 불러오기", expanded=False):
     st.caption("대화로 학습한 정체성을 파일로 받아두고, 다음에 올려 이어가세요.")
-    uploaded = st.file_uploader(
-        "정체성 불러오기 (이전 identity.pkl 업로드)", type=None,
-        help="pkl이 아닌 파일은 자동 무시됩니다.")
+    uploaded = st.file_uploader("정체성 불러오기 (identity.pkl)", type=None,
+                                help="pkl이 아닌 파일은 자동 무시됩니다.")
 
 
-# ── 사고 구조 초기화 (세션 유지) ──
-def build_default_tree():
+def build_base_tree():
     ts = ThoughtStructure(learning_rate=lr, continuity=continuity)
-    ts.add_node(JudgmentNode(
-        'start', '이 질문의 성격을 파악',
-        directive="먼저 이 질문이 무엇을 요구하는지 한 문장으로 파악한다."),
-        is_root=True)
-    ts.add_node(JudgmentNode(
-        'fact', '사실 확인이 필요한 질문으로 판단',
-        directive="이건 사실을 묻는 질문이다. 확실히 아는 것과 불확실한 것을 구분한다."))
-    ts.add_node(JudgmentNode(
-        'advice', '조언·판단이 필요한 질문으로 판단',
-        directive="이건 조언을 구하는 질문이다. 정답이 아니라 판단이 필요하다."))
-    ts.add_node(JudgmentNode(
-        'fact_evidence', '근거를 찾아 사실대로 답',
-        directive="확실한 근거가 있는 것만 단정하고, 불확실한 것은 '불확실하다'고 "
-                  "명시한다. 모르면 모른다고 한다. 추측으로 채우지 않는다.",
+    ts.add_node(JudgmentNode('start', '이 질문의 성격을 파악',
+        directive="이 질문이 무엇을 요구하는지 한 문장으로 파악한다."), is_root=True)
+    ts.add_node(JudgmentNode('fact', '사실 확인이 필요한 질문',
+        directive="사실을 묻는 질문이다. 아는 것과 불확실한 것을 구분한다."))
+    ts.add_node(JudgmentNode('advice', '조언·판단이 필요한 질문',
+        directive="조언을 구하는 질문이다. 정답이 아니라 판단이 필요하다."))
+    ts.add_node(JudgmentNode('fact_evidence', '근거를 찾아 사실대로 답',
+        directive="확실한 근거가 있는 것만 단정하고, 불확실하면 그렇다고 명시한다. "
+                  "모르면 모른다고 한다. 기억에 있으면 그것을 근거로 답한다.",
         is_terminal=True))
-    ts.add_node(JudgmentNode(
-        'fact_direct', '아는 대로 바로 답',
-        directive="아는 대로 간결하게 바로 답한다.", is_terminal=True))
-    ts.add_node(JudgmentNode(
-        'advice_careful', '상황을 따져 신중히 조언',
-        directive="① 관련된 상황 요소들을 먼저 나열한다. "
-                  "② 각 요소를 하나씩 평가한다(좋은 점/걸리는 점). "
-                  "③ 그 평가들을 종합해 결론을 낸다. 이 세 단계가 답에 보여야 한다.",
-        is_terminal=True))
-    ts.add_node(JudgmentNode(
-        'advice_quick', '바로 결론부터 조언',
-        directive="결론을 한 문장으로 먼저 말하고, 이유를 한 줄 덧붙인다.",
+    ts.add_node(JudgmentNode('advice_careful', '상황을 따져 신중히 조언',
+        directive="관련 요소를 따지고, 좋은 점과 걸리는 점을 평가해 결론을 낸다.",
         is_terminal=True))
     ts.add_branch('start', 'fact', 0.5)
     ts.add_branch('start', 'advice', 0.5)
-    ts.add_branch('fact', 'fact_evidence', 0.5)
-    ts.add_branch('fact', 'fact_direct', 0.5)
-    ts.add_branch('advice', 'advice_careful', 0.5)
-    ts.add_branch('advice', 'advice_quick', 0.5)
+    ts.add_branch('fact', 'fact_evidence', 1.0)
+    ts.add_branch('advice', 'advice_careful', 1.0)
     return ts
 
+
 def load_identity_from_bytes(raw: bytes):
-    """업로드 바이트에서 pkl만 골라 정체성 복원. pkl 아니면 None."""
     import pickle, tempfile
     try:
         blob = pickle.loads(raw)
-        # 우리 정체성 pkl인지 최소 확인 (필수 키 존재)
         if not (isinstance(blob, dict) and "transitions" in blob and "nodes" in blob):
             return None
         with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as tf:
-            tf.write(raw)
-            tmp = tf.name
+            tf.write(raw); tmp = tf.name
         return ThoughtStructure.load(tmp)
     except Exception:
-        return None   # pkl이 아니거나 형식 안 맞으면 무시
+        return None
 
 
-# 업로드된 정체성 처리 (파일명으로 중복 로드 방지)
 if uploaded is not None:
     sig = f"{uploaded.name}:{uploaded.size}"
     if st.session_state.get("loaded_sig") != sig:
@@ -109,104 +85,118 @@ if uploaded is not None:
             st.warning("⚠️ pkl 정체성 파일이 아닙니다 (무시됨)")
 
 if "ts" not in st.session_state:
-    st.session_state.ts = build_default_tree()
-    st.session_state.chat = []       # (role, text)
+    st.session_state.ts = build_base_tree()
+    st.session_state.registry = TreeRegistry()
+    try:
+        from tree_registry import load_logic_db_types
+        load_logic_db_types(st.session_state.registry)
+    except Exception:
+        pass
+    st.session_state.chat = []
     st.session_state.last_record = None
+    st.session_state.pending_feedback = False
 
 ts = st.session_state.ts
+if "registry" not in st.session_state:
+    st.session_state.registry = TreeRegistry()
+registry = st.session_state.registry
 
-# 정체성 다운로드 (상단 — 모바일에서 바로 보이게)
-import pickle as _pkl
 ts.save("/tmp/identity.pkl")
 with open("/tmp/identity.pkl", "rb") as f:
     _pkl_bytes = f.read()
-st.download_button(
-    "⬇️ 정체성 다운로드 (identity.pkl)",
-    data=_pkl_bytes,
-    file_name="identity.pkl",
-    mime="application/octet-stream",
-    help="지금까지 학습한 정체성을 파일로 받습니다. 다음에 위 '불러오기'로 올리면 이어집니다.",
+st.download_button("⬇️ 정체성 다운로드 (identity.pkl)", data=_pkl_bytes,
+    file_name="identity.pkl", mime="application/octet-stream",
     use_container_width=True)
 
 col1, col2 = st.columns([3, 2])
 
 with col1:
     st.subheader("대화")
-    # 이전 대화 표시
     for role, text in st.session_state.chat:
         with st.chat_message(role):
             st.write(text)
 
-    user_input = st.chat_input("질문하거나, 직전 답에 반응하세요 (맞아/아니야 등)")
+    # ── 피드백 버튼 ──
+    if st.session_state.last_record is not None and st.session_state.pending_feedback:
+        st.markdown("<small style='color:#5f6368'>이 답변이 맘에 드나요? "
+                    "학습에 반영됩니다.</small>", unsafe_allow_html=True)
+        fc1, fc2, fc3 = st.columns([1, 1, 4])
+        with fc1:
+            if st.button("👍 추천", use_container_width=True):
+                ts.learn(st.session_state.last_record, 1.0)
+                st.session_state.pending_feedback = False
+                st.rerun()
+        with fc2:
+            if st.button("👎 비추천", use_container_width=True):
+                ts.learn(st.session_state.last_record, -1.0)
+                st.session_state.pending_feedback = False
+                st.rerun()
+        with fc3:
+            if st.button("건너뛰기", use_container_width=True):
+                st.session_state.pending_feedback = False
+                st.rerun()
+
+    user_input = st.chat_input("무엇이든 물어보세요")
 
     if user_input:
         if not local and not api_key:
-            st.error("OpenAI Key를 넣거나 로컬 LLM을 켜세요")
-            st.stop()
+            st.error("OpenAI Key를 넣거나 로컬 LLM을 켜세요"); st.stop()
 
         client = make_client(api_key, local=local)
         st.session_state.chat.append(("user", user_input))
 
-        # 1) 먼저 '정보 제공'인지 확인 (이름/선호 등 — 반응보다 우선)
-        #    "내 이름은 민찬기야" 같은 게 반응으로 오인되지 않도록.
+        # 1) 정보 제공이면 자동 기억
         shared = detect_shared_info(user_input, client=client, model=model)
         if shared and hasattr(ts, "remember"):
-            ts.remember(shared, trust=1.0, context=user_input)
-            st.session_state.chat.append(
-                ("assistant", f"기억했어요: {shared} 🔒"))
+            stored = ts.remember(shared, trust=1.0, context=user_input)
+            if stored:
+                st.session_state.chat.append(("assistant", f"기억했어요: {shared} 🔒"))
+            else:
+                st.session_state.chat.append(
+                    ("assistant", f"_(기존 정체성과 충돌해 보류: {shared})_"))
             st.session_state.last_record = None
-            st.session_state.prev_feedback = 0
+            st.session_state.pending_feedback = False
             st.rerun()
 
-        # 2) 정보가 아니면, 직전 답변에 대한 '반응'인지 감지
-        fb = None
-        if st.session_state.last_record is not None:
-            fb = detect_feedback(user_input, client=client, model=model)
-            if fb is not None:
-                prev = st.session_state.last_record
-                ts.learn(prev, fb)
-                # 교정 사건(직전이 부정 → 이번 긍정)이면 확정 기억
-                if fb > 0 and st.session_state.get("prev_feedback", 0) < 0:
-                    if hasattr(ts, "remember_from_correction"):
-                        ts.remember_from_correction(prev, None)
-                    st.session_state.chat.append(
-                        ("assistant", "_(교정 확인 — 확정 기억으로 저장했어요)_"))
-                else:
-                    label = "👍 긍정" if fb > 0 else "👎 부정"
-                    st.session_state.chat.append(
-                        ("assistant", f"_({label} 반응 감지 — 그 판단 경로를 "
-                                      f"{'강화' if fb>0 else '약화'}했어요)_"))
-                st.session_state.prev_feedback = fb
+        # 2) 새 질문으로 사고
+        choose_fn = make_choose_fn(client, model=model)
+        answer_fn = make_answer_fn(client, ts.nodes, model=model)
 
-        # 3) 반응도 정보도 아니면 새 질문으로 사고 진행
-        if fb is None:
-            choose_fn = make_choose_fn(client, model=model)
-            answer_fn = make_answer_fn(client, ts.nodes, model=model)
-            # 관련 기억 + 대화 흐름을 맥락에 주입
-            mem_ctx = ts.memory_context(user_input) if hasattr(ts, "memory_context") else ""
-            flow_ctx = ts.recent_context(6) if hasattr(ts, "recent_context") else ""
-            parts = []
-            if flow_ctx:
-                parts.append(flow_ctx)
-            if mem_ctx:
-                parts.append(mem_ctx)
-            parts.append(f"질문: {user_input}")
-            full_context = "\n\n".join(parts)
-            with st.spinner("판단 트리 위를 이동 중..."):
+        # 유형 자동 생성 (감사 로그)
+        if auto_type:
+            try:
+                designer = make_tree_designer(client, model=model)
+                existing_types = list(registry.trees.keys())
+                design = designer(user_input)
+                if design and design.get("type_id") not in existing_types:
+                    registry.create_from_design(
+                        design, user_input, reason="새 유형 감지 (LLM 설계)")
+            except Exception:
+                pass
+
+        mem_ctx = ts.memory_context(user_input) if hasattr(ts, "memory_context") else ""
+        flow_ctx = ts.recent_context(6) if hasattr(ts, "recent_context") else ""
+        parts = []
+        if flow_ctx: parts.append(flow_ctx)
+        if mem_ctx: parts.append(mem_ctx)
+        parts.append(f"질문: {user_input}")
+        full_context = "\n\n".join(parts)
+
+        with st.spinner("판단 트리 위를 이동 중..."):
+            if hasattr(ts, "traverse_verified"):
                 rec = ts.traverse_verified(choose_fn=choose_fn, answer_fn=answer_fn,
                                            context=full_context, max_retry=1)
-            # 기록엔 원래 질문만 (감사 로그 깔끔하게)
-            rec.context = user_input
-            # 대화 맥락에 흡수 (흐름 유지)
-            if hasattr(ts, "add_episode"):
-                ts.add_episode(user_input, rec.answer)
-            st.session_state.last_record = rec
-            st.session_state.prev_feedback = 0
-            st.session_state.chat.append(("assistant", rec.answer))
-            # 매 턴 망각 (안 쓰인 기억 약화)
-            if hasattr(ts, "forget_step"):
-                ts.forget_step()
-
+            else:
+                rec = ts.traverse(choose_fn=choose_fn, answer_fn=answer_fn,
+                                  context=full_context)
+        rec.context = user_input
+        if hasattr(ts, "add_episode"):
+            ts.add_episode(user_input, rec.answer)
+        st.session_state.last_record = rec
+        st.session_state.pending_feedback = True
+        st.session_state.chat.append(("assistant", rec.answer))
+        if hasattr(ts, "forget_step"):
+            ts.forget_step()
         st.rerun()
 
 with col2:
@@ -214,17 +204,13 @@ with col2:
     rec = st.session_state.last_record
     if rec:
         if rec.context:
-            st.markdown(f"<small>📥 입력: {rec.context[:40]}</small>",
-                        unsafe_allow_html=True)
+            st.markdown(f"<small>📥 입력: {rec.context[:40]}</small>", unsafe_allow_html=True)
         if getattr(rec, 'timestamp', ''):
             st.markdown(f"<small>🕐 {rec.timestamp}</small>", unsafe_allow_html=True)
         if hasattr(rec, 'verified'):
-            vtag = "✅ 자기검증 통과" if rec.verified else "⚠️ 검증 미통과(재계산함)"
+            vtag = "✅ 자기검증 통과" if rec.verified else "⚠️ 검증 미통과(재계산)"
             st.markdown(f"<small>{vtag}</small>", unsafe_allow_html=True)
-        if getattr(rec, 'sources', None):
-            st.markdown(f"<small>📚 근거: {', '.join(rec.sources)[:60]}</small>",
-                        unsafe_allow_html=True)
-        st.markdown("**이번 답변의 판단 경로:**")
+        st.markdown("**판단 경로:**")
         for i, nid in enumerate(rec.path):
             node = ts.nodes.get(nid)
             arrow = "→ " if i > 0 else "📍 "
@@ -236,41 +222,33 @@ with col2:
         st.caption("질문하면 여기에 판단 경로가 보여요")
 
     st.markdown("---")
-    st.subheader("🎭 정체성 (학습된 전이)")
-    st.markdown("**현재 지배 경로 (기본 사고):**")
+    st.subheader("🎭 정체성")
     dom = ts.dominant_path()
-    st.markdown(" → ".join(ts.nodes[n].prompt[:12] for n in dom))
+    st.markdown("**기본 사고 경로:** " + " → ".join(ts.nodes[n].prompt[:12] for n in dom))
+    st.markdown(f"**정체성 안정도:** {ts.continuity_rate():.0%}  ·  "
+                f"**학습:** {len(ts.history)}회")
 
-    st.markdown("**전이 확률:**")
-    for frm in ts.transitions:
-        tr = ts.transitions[frm]
-        if tr:
-            frm_name = ts.nodes[frm].prompt[:14]
-            for to, p in tr.items():
-                to_name = ts.nodes[to].prompt[:14]
-                bar = "█" * int(p * 12)
-                st.markdown(f"<small>{frm_name} → {to_name}: `{bar}` {p:.0%}</small>",
-                            unsafe_allow_html=True)
-
-    st.markdown(f"**정체성 안정도:** {ts.continuity_rate():.0%}")
-    st.markdown(f"**총 학습 횟수:** {len(ts.history)}")
-
-    # 기억 (기억흐름 + 망각) — 구버전 엔진 호환
     _mem = getattr(ts, "memory", None)
     if _mem:
         st.markdown("---")
-        st.markdown("**🧷 기억 (교정=확정, 나머지는 점차 망각)**")
+        st.markdown("**🧷 기억**")
         for i, m in enumerate(sorted(_mem, key=lambda x: -x["trust"]*x["strength"])):
             tag = "🔒" if m["trust"] >= 1.0 else "📎"
-            c1, c2 = st.columns([5, 1])
-            with c1:
-                st.markdown(f"<small>{tag} {m['content'][:40]}</small>",
+            mc1, mc2 = st.columns([5, 1])
+            with mc1:
+                st.markdown(f"<small>{tag} {m['content'][:38]}</small>",
                             unsafe_allow_html=True)
-            with c2:
-                if st.button("🗑", key=f"del_mem_{i}_{m['content'][:8]}"):
-                    ts.memory.remove(m)
-                    st.rerun()
+            with mc2:
+                if st.button("🗑", key=f"del_{i}_{m['content'][:6]}"):
+                    ts.memory.remove(m); st.rerun()
 
-st.caption("처음엔 실수해도 됩니다. 답이 맘에 들면 '맞아', 아니면 '아니야'로 반응하세요. "
-           "그 반응이 판단 경로를 강화/약화해, 점점 당신에게 맞는 사고로 자랍니다. "
-           "이 궤적·전이가 곧 설명이자 정체성입니다.")
+    clog = registry.creation_history() if hasattr(registry, "creation_history") else []
+    if clog:
+        st.markdown("---")
+        st.markdown("**🌱 자동 생성된 유형 (감사)**")
+        for log in clog[-5:]:
+            st.markdown(f"<small>• **{log['type_id']}** ← {log['trigger_question'][:24]}<br>"
+                        f"<span style='color:#888'>{' → '.join(log['steps'])}</span></small>",
+                        unsafe_allow_html=True)
+
+st.caption("Arcogit — 사고가 곧 존재, 궤적이 곧 정체성. 답에 👍/👎로 반응하면 학습됩니다.")

@@ -252,3 +252,4 @@ with col2:
                         unsafe_allow_html=True)
 
 st.caption("Arcogit — 사고가 곧 존재, 궤적이 곧 정체성. 답에 👍/👎로 반응하면 학습됩니다.")
+
